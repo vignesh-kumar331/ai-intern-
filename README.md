@@ -1,36 +1,35 @@
 # AI Support Ticket Intelligence
 
-End-to-end AI Engineer assessment implementation for the DOTMappers IT Pvt. Ltd. support-ticket sprint. The brief requires CSV ingestion/querying, natural-language analytics, anomaly detection, a REST API and a minimal UI, with an LLM used for natural-language understanding.
+End-to-end Python implementation for the DOTMappers AI Engineer assessment: CSV ingestion/querying, natural-language support-ticket analytics, anomaly detection, REST API and minimal UI using a local LLM.
 
-## What this repository implements
+## Features
 
-- CSV ingestion into SQLite using the supplied `support_tickets.csv`.
-- LLM-powered natural-language query planning with Ollama.
-- Pydantic validation and parameterized SQLite queries; the LLM never writes executable SQL.
-- Resolution-time anomaly detection using `Q3 + 1.5 × IQR`.
-- Unresolved High/Critical tickets older than 24 hours.
-- FastAPI REST API and responsive browser UI.
-- Tests, GitHub Actions CI, Docker support and zero paid services.
+- Supplied 500-row support-ticket dataset preserved exactly in a compressed bootstrap payload.
+- On first startup, the payload recreates `data/support_tickets.csv`; the CSV is then ingested into SQLite.
+- Ollama local LLM converts natural language into a validated structured `QueryPlan`.
+- The model never produces executable SQL. The application builds allowlisted, parameterized SQL.
+- Resolution anomaly detection with `Q3 + 1.5 × IQR`.
+- High/Critical Open/Escalated tickets older than 24 hours.
+- FastAPI: `/api/health`, `/api/stats`, `/api/query`, `/api/anomalies`.
+- Responsive browser UI at `/`.
+- Automated tests, GitHub Actions CI, Docker support and no paid APIs.
 
 ## Architecture
 
 ```text
-Browser UI -> FastAPI -> Ollama -> validated QueryPlan -> safe SQL -> SQLite
+Browser -> FastAPI -> Ollama -> JSON QueryPlan -> Pydantic -> Safe SQL -> SQLite
                          \-> deterministic anomaly engine -> SQLite
 ```
 
-The design deliberately separates language understanding from data execution. This reduces SQL-injection risk and prevents arbitrary model-generated SQL from executing.
+The LLM handles language understanding; deterministic application code handles data access and anomaly rules.
 
-## Dataset
+## Quick start
 
-The supplied schema contains: `ticket_id`, `created_at`, `category`, `priority`, `status`, `response_time_hrs`, `resolution_time_hrs`, `agent_id`, `customer_rating`, and `issue_summary`. The supplied CSV contains 500 rows. Null resolution time and customer rating values are preserved for unresolved tickets.
-
-## Local setup
+Requirements: Python 3.11+ and Ollama.
 
 ```bash
 python -m venv .venv
-# Windows
-.venv\\Scripts\\activate
+# Windows: .venv\\Scripts\\activate
 # macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
 ollama pull qwen2.5:3b
@@ -39,44 +38,42 @@ uvicorn app.main:app
 
 Open `http://127.0.0.1:8000`.
 
+If `data/support_tickets.csv` is absent, the application automatically recreates the supplied assessment CSV from `data/dataset_payload.py` before ingestion. This keeps the repository self-contained while avoiding a large raw data blob in Git.
+
 ## API
 
-- `GET /api/health`
-- `GET /api/stats`
-- `POST /api/query`
-- `GET /api/anomalies`
+- `GET /api/health` — service, row count and LLM availability.
+- `GET /api/stats` — dataset totals by status, priority and category.
+- `POST /api/query` — natural-language analytics.
+- `GET /api/anomalies` — anomaly findings.
 
 Example:
 
-```json
-POST /api/query
-{"question":"How many tickets are currently open?"}
+```bash
+curl -X POST http://127.0.0.1:8000/api/query \
+  -H "Content-Type: application/json" \
+  -d '{"question":"How many tickets are currently open?"}'
 ```
 
-## Assessment sample results
+## Assessment examples
+
+The supplied dataset gives these checks:
 
 - Open tickets: **111**
 - Critical tickets not resolved within 12 hours: **34**
 - Average Technical customer rating: **3.74**
 - Agent resolution aggregation is supported.
 
-Date phrases such as `this week` and `this month` are interpreted relative to the latest timestamp in the supplied dataset so historical assessment data remains meaningful.
+The planner supports common phrases including `this week`, `this month`, `last 7 days`, and `last 30 days`, interpreted relative to the dataset's latest timestamp.
 
-## LLM safety
+## LLM and safety
 
-1. Ollama receives a strict system prompt with the available schema and allowed values.
-2. The model returns structured JSON, not SQL.
-3. Pydantic validates the JSON.
-4. The query engine maps validated fields to an allowlist of SQL fragments.
-5. User-derived values are bound with SQLite parameters.
-6. A deterministic safety-net parser keeps smoke tests usable if Ollama is unavailable; normal operation uses the local LLM.
+The Ollama system prompt exposes only the real schema and allowed categorical values. The model returns JSON; Pydantic validates it; the query engine uses a fixed metric/group allowlist and SQLite parameters. If Ollama is unavailable, a deterministic parser handles common assessment questions so the API remains testable; `/api/health` and `/api/query` expose whether the LLM was available/used.
 
 ## Anomaly detection
 
-Two transparent rules are used:
-
-- Long resolution: `resolution_time_hrs > Q3 + 1.5 × IQR`.
-- Stale high priority: `High/Critical` + `Open/Escalated` + older than 24 hours relative to the latest dataset timestamp.
+1. **Long resolution:** `resolution_time_hrs > Q3 + 1.5 × IQR`.
+2. **Stale high priority:** `High/Critical` + `Open/Escalated` + older than 24 hours relative to the latest dataset timestamp.
 
 ## Testing
 
@@ -98,18 +95,21 @@ app/
   anomalies.py
   config.py
   database.py
+  dataset_payload.py
   llm.py
   main.py
   query_engine.py
   schemas.py
   static/index.html
-data/support_tickets.csv
-tests/test_query_engine.py
+data/
+  dataset_payload.py
+tests/test_smoke.py
 Dockerfile
 docker-compose.yml
 requirements.txt
+.github/workflows/ci.yml
 ```
 
-## Limitations and scaling
+## Limitations / future improvements
 
-The NL planner intentionally supports a controlled analytics vocabulary. For production scale, SQLite could be replaced by PostgreSQL, with caching, observability, authentication, richer semantic metrics, model evaluation and asynchronous processing. The assessment scope does not require authentication or production deployment infrastructure.
+The NL vocabulary is intentionally controlled for safety and predictable assessment behavior. With more time: richer semantic metrics, model evaluation, PostgreSQL for larger data, caching, observability, authentication, asynchronous workloads and production deployment controls.
